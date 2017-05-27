@@ -23,13 +23,15 @@
 
 using namespace std;
 
+static bool print_debug = false;
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
-	num_particles = 50;
+	num_particles = 10;
 
 	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 	default_random_engine gen(seed);
@@ -54,8 +56,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 
 		// create new particle
 		Particle new_particle;		
-		new_particle.id    = i; 
-///		new_particle.id    = i + 1; 
+		new_particle.id    = i + 1; 
 
 		// Sample  and from these normal distrubtions
 		// where "gen" is the random engine initialized earlier (line 21).
@@ -67,11 +68,12 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 		new_particle.weight = 1.0f;
 
 		// Print your samples to the terminal.
-		cout << "Sample " << new_particle.id << " " << new_particle.x << " " << new_particle.y << " " << new_particle.theta << endl;
+		if( print_debug ) cout << "Sample " << new_particle.id << " " << new_particle.x << " " << new_particle.y << " " << new_particle.theta << endl;
 
 		// append new particle
 		particles.push_back(new_particle);
 	}
+    if( print_debug ) cout << "WEIGHTS = " << weights[0] << endl;
 
 	is_initialized = true;
 }
@@ -96,6 +98,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	normal_distribution<double> dist_y(0, std_y);
 	normal_distribution<double> dist_theta(0, std_theta);
 
+    if( print_debug ) cout << "PREDICT:" << endl;
     for(unsigned int i = 0; i < num_particles; ++i) {
 
         // measurement noise
@@ -113,19 +116,20 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 
 		if (fabs(yaw_rate) < 0.001) {
 			// Avoid division by zero
+			theta_new = theta_cur;
 			x_new = x_cur + velocity * std::cos( theta_cur ) * delta_t;
 			y_new = y_cur + velocity * std::sin( theta_cur ) * delta_t;
-			theta_new = theta_cur;
 		} else {
 			// Update particles according to motion model
-			x_new = x_cur + ( velocity / yaw_rate ) * ( std::sin( theta_cur + yaw_rate * delta_t ) - std::sin( theta_cur ) );
-			y_new = y_cur + ( velocity / yaw_rate ) * ( std::cos( theta_cur ) - std::cos( theta_cur + yaw_rate * delta_t ) );
 			theta_new = theta_cur + yaw_rate * delta_t;
+			x_new = x_cur + ( velocity / yaw_rate ) * ( std::sin( theta_new ) - std::sin( theta_cur ) );
+			y_new = y_cur + ( velocity / yaw_rate ) * ( std::cos( theta_cur ) - std::cos( theta_new ) );
 		}
 
 		particles[i].x = x_new + x_noise;
 		particles[i].y = y_new + y_noise;
 		particles[i].theta = theta_new + theta_noise;
+        if( print_debug ) cout << " Sample " << particles[i].id << " " << particles[i].x << " " << particles[i].y << " " << particles[i].theta << endl;
 	}
 }
 
@@ -176,6 +180,8 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 
 		// Transform observations from vehicle to map
 		std::vector<LandmarkObs> observations_map;
+        observations_map.clear();
+
 		for( unsigned int j = 0; j < observations.size(); ++j )
 		{
 			double x_obs, y_obs;
@@ -224,10 +230,14 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				lm_x = closest_lm->x_f;
 				lm_y = closest_lm->y_f;
 
-				double x_part, y_part, theta_part;
+/*				double x_part, y_part, theta_part;
 				x_part     = particles[i].x;
 				y_part     = particles[i].y;
-				theta_part = particles[i].theta;
+                theta_part = particles[i].theta;*/
+
+                double x_obs, y_obs;
+                x_obs = observations_map[j].x;
+                y_obs = observations_map[j].y;
 				
 				double std_x, std_y;
 				std_x = std_landmark[0];
@@ -235,19 +245,19 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				
 				double meas_prob;
 //				meas_prob = helper::normpdf2(x_part, y_part, lm_x, lm_y, std_x, std_y);
-				double PI = 3.141562;
-                meas_prob = 1/(2.0*PI*std_x*std_y)*std::exp(-(std::pow(x_part-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_part-lm_y,2.0)/(2.0*pow(std_y,2.0))));
-//				cout << "  part(" << x_part <<  "," << y_part << " ), lm(" << lm_x << "," << lm_y << "), std(" << std_x << "," << std_y << ")" << endl;
-//				cout << "  p[" << j << "]: " << meas_prob << endl;
+//                meas_prob = 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_part-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_part-lm_y,2.0)/(2.0*pow(std_y,2.0))));
+                meas_prob = 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_obs-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_obs-lm_y,2.0)/(2.0*pow(std_y,2.0))));
+				if( print_debug ) 		cout << "  obs(" << x_obs <<  "," << y_obs << " ), lm(" << lm_x << "," << lm_y << "), std(" << std_x << "," << std_y << ") --> p[" << j << "] =  " << meas_prob << endl;
 				particles[i].weight *= meas_prob;
 			} else {
 				cout << "no close landmark" << endl;
 			}
 		}
 		weights[i] = particles[i].weight;
-	}
-	for( unsigned int i = 0; i < num_particles; ++i ) {
-//		cout << "  w[" << i << "]: " << weights[i] << endl;
+    }
+
+    if( print_debug ) for( unsigned int i = 0; i < num_particles; ++i ) {
+		cout << "  w[" << i << "]: " << weights[i] << endl;
 	}
 }
 
@@ -259,16 +269,19 @@ void ParticleFilter::resample() {
 	// see: https://stackoverflow.com/questions/26475595/pseudo-random-number-generator-gives-same-first-output-but-then-behaves-as-expec
 	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 	default_random_engine gen(seed);
-	uniform_real_distribution<double> beta_uniform(0, 1);
-	uniform_int_distribution<int> init_idx(0, num_particles);
+	uniform_real_distribution<double> beta_uniform(0.0, 1.0);
+	uniform_int_distribution<int> init_idx(0, num_particles-1);
 
 	double beta, w_max;
 	unsigned int idx;
 	idx = init_idx(gen);
-	cout << "idx: " << idx << endl;
 	beta = 0.0;
 	w_max = *std::max_element(weights.begin(), weights.end());
-	cout << "w_max: " << w_max << endl;
+    if( print_debug ) {
+        cout << "idx: " << idx << endl;
+        cout << "w_max: " << w_max << endl;
+    }
+
 	std::vector<Particle> new_particles;
 	for( unsigned int i = 0; i < num_particles; ++i ) {
 		beta += beta_uniform(gen) * 2.0 * w_max;
@@ -279,6 +292,12 @@ void ParticleFilter::resample() {
 		new_particles.push_back( particles[idx] );
 	}
 	particles = new_particles;
+
+    if( print_debug ) { cout << "RESAMPLE:" << endl;
+        for( unsigned int i = 0; i < num_particles; ++i ) {
+            cout << " Sample " << particles[i].id << " " << particles[i].x << " " << particles[i].y << " " << particles[i].theta << endl;
+        }
+    }
 }
 
 Particle ParticleFilter::SetAssociations(Particle particle, std::vector<int> associations, std::vector<double> sense_x, std::vector<double> sense_y)
