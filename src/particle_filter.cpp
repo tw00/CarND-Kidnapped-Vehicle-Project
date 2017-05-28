@@ -16,8 +16,8 @@
 #include <string>
 #include <iterator>
 // added by TW:
-#include <chrono>
-#include <ctime>
+//#include <chrono>
+//#include <ctime>
 
 #include "particle_filter.h"
 
@@ -25,16 +25,19 @@ using namespace std;
 
 static bool print_debug = false;
 
+// see:
+// https://stackoverflow.com/questions/22105867/seeding-default-random-engine
+// https://stackoverflow.com/questions/26475595/pseudo-random-number-generator-gives-same-first-output-but-then-behaves-as-expec
+// unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+static default_random_engine gen(std::random_device{}());
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
-	num_particles = 10;
-
-	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-	default_random_engine gen(seed);
+	num_particles = 20;
 
 	// Set standard deviations for x, y, and theta.
 	double std_x, std_y, std_theta;
@@ -83,9 +86,6 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	// NOTE: When adding noise you may find std::normal_distribution and std::default_random_engine useful.
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
-
-	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-	default_random_engine gen(seed);
 
 	// Set standard deviations for x, y, and theta.
 	double std_x, std_y, std_theta; 
@@ -173,6 +173,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		static float normpdf2(float x, float y, float mu_x, float mu_y, float std_x, float std_y) {
 			const float ONE_OVER_SQRT_2PI = 1/sqrt(2*M_PI) ;
 			return (ONE_OVER_SQRT_2PI/(std_x*std_y))*exp(-0.5*( squared((x-mu_x)/std_x) + squared((y-mu_y)/std_y) ));
+            // 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_obs-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_obs-lm_y,2.0)/(2.0*pow(std_y,2.0))));
 		}
 	};
 
@@ -230,11 +231,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				lm_x = closest_lm->x_f;
 				lm_y = closest_lm->y_f;
 
-/*				double x_part, y_part, theta_part;
-				x_part     = particles[i].x;
-				y_part     = particles[i].y;
-                theta_part = particles[i].theta;*/
-
                 double x_obs, y_obs;
                 x_obs = observations_map[j].x;
                 y_obs = observations_map[j].y;
@@ -244,13 +240,12 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				std_y = std_landmark[1];
 				
 				double meas_prob;
-//				meas_prob = helper::normpdf2(x_part, y_part, lm_x, lm_y, std_x, std_y);
-//                meas_prob = 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_part-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_part-lm_y,2.0)/(2.0*pow(std_y,2.0))));
-                meas_prob = 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_obs-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_obs-lm_y,2.0)/(2.0*pow(std_y,2.0))));
-				if( print_debug ) 		cout << "  obs(" << x_obs <<  "," << y_obs << " ), lm(" << lm_x << "," << lm_y << "), std(" << std_x << "," << std_y << ") --> p[" << j << "] =  " << meas_prob << endl;
+				meas_prob = helper::normpdf2(x_obs, y_obs, lm_x, lm_y, std_x, std_y);
+				if( print_debug ) cout << "  obs(" << x_obs <<  "," << y_obs << " ), lm(" << lm_x << "," << lm_y << "), std(" << std_x << "," << std_y << ") --> p[" << j << "] =  " << meas_prob << endl;
+
 				particles[i].weight *= meas_prob;
 			} else {
-				cout << "no close landmark" << endl;
+				cout << "no close landmark found" << endl;
 			}
 		}
 		weights[i] = particles[i].weight;
@@ -266,17 +261,16 @@ void ParticleFilter::resample() {
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
 
-	// see: https://stackoverflow.com/questions/26475595/pseudo-random-number-generator-gives-same-first-output-but-then-behaves-as-expec
-	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-	default_random_engine gen(seed);
 	uniform_real_distribution<double> beta_uniform(0.0, 1.0);
 	uniform_int_distribution<int> init_idx(0, num_particles-1);
 
-	double beta, w_max;
 	unsigned int idx;
-	idx = init_idx(gen);
-	beta = 0.0;
+	double beta, w_max;
+
+	idx   = init_idx(gen);
+	beta  = 0.0;
 	w_max = *std::max_element(weights.begin(), weights.end());
+
     if( print_debug ) {
         cout << "idx: " << idx << endl;
         cout << "w_max: " << w_max << endl;
@@ -293,7 +287,8 @@ void ParticleFilter::resample() {
 	}
 	particles = new_particles;
 
-    if( print_debug ) { cout << "RESAMPLE:" << endl;
+    if( print_debug ) { 
+        cout << "RESAMPLE:" << endl;
         for( unsigned int i = 0; i < num_particles; ++i ) {
             cout << " Sample " << particles[i].id << " " << particles[i].x << " " << particles[i].y << " " << particles[i].theta << endl;
         }
