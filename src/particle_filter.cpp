@@ -3,7 +3,6 @@
  *
  *  Created on: Dec 12, 2016
  *      Author: Tiffany Huang
- *      Author: Thomas Weustenfeld
  */
 
 #include <random>
@@ -15,9 +14,6 @@
 #include <sstream>
 #include <string>
 #include <iterator>
-// added by TW:
-//#include <chrono>
-//#include <ctime>
 
 #include "particle_filter.h"
 
@@ -25,11 +21,8 @@ using namespace std;
 
 static bool print_debug = false;
 
-// see:
-// https://stackoverflow.com/questions/22105867/seeding-default-random-engine
-// https://stackoverflow.com/questions/26475595/pseudo-random-number-generator-gives-same-first-output-but-then-behaves-as-expec
-// unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 static default_random_engine gen(std::random_device{}());
+// see: https://stackoverflow.com/questions/22105867/seeding-default-random-engine
 
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// Set the number of particles. Initialize all particles to first position (based on estimates of 
@@ -114,6 +107,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 		y_cur = particles[i].y;
 		theta_cur = particles[i].theta;
 
+        // predict new position
 		if (fabs(yaw_rate) < 0.001) {
 			// Avoid division by zero
 			theta_new = theta_cur;
@@ -126,9 +120,11 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 			y_new = y_cur + ( velocity / yaw_rate ) * ( std::cos( theta_cur ) - std::cos( theta_new ) );
 		}
 
+        // add noise
 		particles[i].x = x_new + x_noise;
 		particles[i].y = y_new + y_noise;
 		particles[i].theta = theta_new + theta_noise;
+
         if( print_debug ) cout << " Sample " << particles[i].id << " " << particles[i].x << " " << particles[i].y << " " << particles[i].theta << endl;
 	}
 }
@@ -138,8 +134,6 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
 	//   observed measurement to this particular landmark.
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
-
-	// TODO!!
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
@@ -156,7 +150,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   http://planning.cs.uiuc.edu/node99.html
 
 	// helper for calculating norm distribution
-	//definition of one over square root of 2*pi:
 	struct helper {
 		//definition square:
 		static float squared(float x) {
@@ -173,13 +166,12 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		static float normpdf2(float x, float y, float mu_x, float mu_y, float std_x, float std_y) {
 			const float ONE_OVER_SQRT_2PI = 1/sqrt(2*M_PI) ;
 			return (ONE_OVER_SQRT_2PI/(std_x*std_y))*exp(-0.5*( squared((x-mu_x)/std_x) + squared((y-mu_y)/std_y) ));
-            // 1/(2.0*M_PI*std_x*std_y)*std::exp(-(std::pow(x_obs-lm_x,2.0)/(2.0*pow(std_x,2.0))+pow(y_obs-lm_y,2.0)/(2.0*pow(std_y,2.0))));
 		}
 	};
 
     for( unsigned int i = 0; i < num_particles; ++i ) {
 
-		// Transform observations from vehicle to map
+		// Transform observations from vehicle to map coordinates
 		std::vector<LandmarkObs> observations_map;
         observations_map.clear();
 
@@ -204,10 +196,12 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 			observations_map.push_back(obs_map);
 		}
 
+        // calculate weights for all particles using nearest neighbour matching
 		particles[i].weight = 1.0f;
 
 		for( unsigned int j = 0; j < observations_map.size(); ++j)
 		{
+            // initialize closest distance to sensor range
 			double closest_dist = sensor_range;
 			Map::single_landmark_s* closest_lm = NULL;
 
@@ -217,15 +211,19 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				lm_x = map_landmarks.landmark_list[k].x_f;
 				lm_y = map_landmarks.landmark_list[k].y_f;
 
+                // calculate distance (see helper_functions.h)
 				double cur_dist;
 				cur_dist = dist(observations_map[j].x, observations_map[j].y, lm_x, lm_y);
-				
+
+                // if a closer match was found, update new closest distance and remember landmark    
 				if( cur_dist < closest_dist ) {
 					closest_dist = cur_dist;
 					closest_lm = &map_landmarks.landmark_list[k];
 				}
 			}
 
+            // if closest landmark was found, multiply overall probability with 
+            // partial probability of current particle
 			if( closest_lm ) {
 				double lm_x, lm_y;
 				lm_x = closest_lm->x_f;
@@ -241,14 +239,21 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 				
 				double meas_prob;
 				meas_prob = helper::normpdf2(x_obs, y_obs, lm_x, lm_y, std_x, std_y);
+				particles[i].weight *= meas_prob;
+
 				if( print_debug ) cout << "  obs(" << x_obs <<  "," << y_obs << " ), lm(" << lm_x << "," << lm_y << "), std(" << std_x << "," << std_y << ") --> p[" << j << "] =  " << meas_prob << endl;
 
-				particles[i].weight *= meas_prob;
 			} else {
 				cout << "no close landmark found" << endl;
 			}
 		}
 		weights[i] = particles[i].weight;
+    }
+
+    // normalize weights
+    double sum_of_weights = std::accumulate(weights.begin(), weights.end(), (double) 0);
+    for( unsigned int i = 0; i < num_particles; ++i ) {
+		weights[i] = particles[i].weight = particles[i].weight / sum_of_weights;
     }
 
     if( print_debug ) for( unsigned int i = 0; i < num_particles; ++i ) {
@@ -276,6 +281,7 @@ void ParticleFilter::resample() {
         cout << "w_max: " << w_max << endl;
     }
 
+    // use resampling wheel to select new particles based on particle weights
 	std::vector<Particle> new_particles;
 	for( unsigned int i = 0; i < num_particles; ++i ) {
 		beta += beta_uniform(gen) * 2.0 * w_max;
